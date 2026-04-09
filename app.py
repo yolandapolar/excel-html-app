@@ -264,17 +264,35 @@ def index():
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    f = request.files.get("file")
-    if not f or not f.filename.lower().endswith(".xlsx"):
-        return "Моля качи .xlsx файл.", 400
-    sid = session.get("sid") or uuid.uuid4().hex
-    session["sid"] = sid
-    data = f.read()
-    STORAGE[sid] = {"xlsx": data}
-    df = pd.read_excel(io.BytesIO(data), sheet_name=0, dtype=str).fillna("")
-    STORAGE[sid]["df"] = df
-    STORAGE[sid]["headers"] = list(df.columns)
-    return render_template_string(T_FOUND, headers=STORAGE[sid]["headers"])
+    try:
+        f = request.files.get("file")
+        print("DEBUG file:", f)
+        print("DEBUG filename:", getattr(f, "filename", None))
+
+        if not f or not f.filename.lower().endswith(".xlsx"):
+            return "Моля качи .xlsx файл.", 400
+
+        sid = session.get("sid") or uuid.uuid4().hex
+        session["sid"] = sid
+        print("DEBUG sid:", sid)
+
+        data = f.read()
+        print("DEBUG bytes:", len(data))
+
+        STORAGE[sid] = {"xlsx": data}
+
+        df = pd.read_excel(io.BytesIO(data), sheet_name=0, dtype=str, engine="openpyxl").fillna("")
+        print("DEBUG df shape:", df.shape)
+
+        STORAGE[sid]["df"] = df
+        STORAGE[sid]["headers"] = list(df.columns)
+
+        return render_template_string(T_FOUND, headers=STORAGE[sid]["headers"])
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return f"<h1>UPLOAD ERROR</h1><pre>{str(e)}</pre>", 500
 
 @app.route("/plan", methods=["POST"])
 def plan():
