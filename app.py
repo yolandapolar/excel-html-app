@@ -13,6 +13,7 @@ ACRONYM_CANON = {
     "spf": "SPF", "uv": "UV", "uva": "UVA", "uvb": "UVB", "egf": "EGF", "sd": "SD",
     "hdmi": "HDMI", "usb": "USB", "ph": "pH"
 }
+LOWER_UNITS = {"ml", "oz", "kg", "g", "mg", "l", "gr"}
 SMALL_WORDS = {
     "de", "des", "du", "le", "la", "les", "pour", "aux", "and", "of", "the",
     "for", "with", "von", "di", "da", "del", "in", "on", "at", "by", "to"
@@ -22,18 +23,26 @@ def _title_token(tok: str, first_in_seg: bool) -> str:
     if not tok:
         return tok
     low = tok.lower()
+
+    if low in LOWER_UNITS:
+        return low
     if low in ACRONYM_CANON:
         return ACRONYM_CANON[low]
     if not first_in_seg and low in SMALL_WORDS:
         return low
+
     return tok[0].upper() + tok[1:].lower()
 
 def _every_word_cap(tok: str) -> str:
     if not tok:
         return tok
     low = tok.lower()
+
+    if low in LOWER_UNITS:
+        return low
     if low in ACRONYM_CANON:
         return ACRONYM_CANON[low]
+
     return tok[0].upper() + tok[1:].lower()
 
 def normalize_name(text, title_every_word=True):
@@ -58,20 +67,23 @@ def normalize_name(text, title_every_word=True):
     )
     s = re.sub(r"\s+", " ", s).strip()
 
-    # точно " Ml " / "ML" / "mL" / "ml" -> " ml "
-    s = re.sub(r"\bml\b", "ml", s, flags=re.IGNORECASE)
-
-    # маха "0 Ml", "0 ML", "0ml", "0.0 Ml" и подобни
+    # Маха 0 ml / 0 oz
     s = re.sub(r"\b0(?:[.,]0+)?\s*ML\b", "", s, flags=re.IGNORECASE)
     s = re.sub(r"\b0(?:[.,]0+)?\s*OZ\b", "", s, flags=re.IGNORECASE)
     s = re.sub(r"\s+", " ", s).strip()
 
-    # нормализира количества
+    # Нормализира мерни единици
     s = re.sub(r"\b([0-9]+)\s*ML\b", r"\1 ml", s, flags=re.IGNORECASE)
     s = re.sub(r"\b([0-9.]+)\s*OZ\b", r"\1 oz", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b([0-9]+)\s*KG\b", r"\1 kg", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b([0-9]+)\s*G\b", r"\1 g", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b([0-9]+)\s*MG\b", r"\1 mg", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b([0-9]+)\s*L\b", r"\1 l", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b([0-9]+)\s*GR\b", r"\1 gr", s, flags=re.IGNORECASE)
 
     segs = [p.strip() for p in s.split(" – ")] if " – " in s else [s]
     out = []
+
     for seg in segs:
         words = []
         for w in seg.split(" "):
@@ -87,7 +99,19 @@ def normalize_name(text, title_every_word=True):
         out.append(" ".join(words))
 
     s = " – ".join(out)
-    s = s.replace("Eau De Parfum", "Eau de Parfum").replace("Eau De Toilette", "Eau de Toilette").replace("Eau De Cologne", "Eau de Cologne")
+
+    # Фикс след title-casing, за да не стане пак Ml / Oz
+    s = re.sub(r"\bMl\b", "ml", s)
+    s = re.sub(r"\bOz\b", "oz", s)
+    s = re.sub(r"\bKg\b", "kg", s)
+    s = re.sub(r"\bMg\b", "mg", s)
+    s = re.sub(r"\bGr\b", "gr", s)
+    s = re.sub(r"\bL\b", "l", s)
+
+    s = s.replace("Eau De Parfum", "Eau de Parfum")
+    s = s.replace("Eau De Toilette", "Eau de Toilette")
+    s = s.replace("Eau De Cologne", "Eau de Cologne")
+
     s = re.sub(r"\(\s*\)", "", s)
     s = re.sub(r"\[\s*\]", "", s)
     s = re.sub(r"\s+[-–]\s*$", "", s)
@@ -97,6 +121,7 @@ def normalize_name(text, title_every_word=True):
     full = s
     if len(s) > 60:
         s = s[:60] + "…"
+
     return s, full
 
 # ---------------- Numbers / Price / EAN ----------------
@@ -110,7 +135,6 @@ def clean_price(v):
     s = s.replace("€", "").replace("$", "").replace("£", "")
     s = s.replace(" ", "")
 
-    # По-умна логика:
     # 1,234.56 -> 1234.56
     # 1.234,56 -> 1234.56
     # 12,50 -> 12.50
