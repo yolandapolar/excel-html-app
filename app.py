@@ -13,7 +13,10 @@ ACRONYM_CANON = {
     "spf": "SPF", "uv": "UV", "uva": "UVA", "uvb": "UVB", "egf": "EGF", "sd": "SD",
     "hdmi": "HDMI", "usb": "USB", "ph": "pH"
 }
-SMALL_WORDS = {"de", "des", "du", "le", "la", "les", "pour", "aux", "and", "of", "the", "for", "with", "von", "di", "da", "del", "in", "on", "at", "by", "to"}
+SMALL_WORDS = {
+    "de", "des", "du", "le", "la", "les", "pour", "aux", "and", "of", "the",
+    "for", "with", "von", "di", "da", "del", "in", "on", "at", "by", "to"
+}
 
 def _title_token(tok: str, first_in_seg: bool) -> str:
     if not tok:
@@ -47,8 +50,16 @@ def normalize_name(text, title_every_word=True):
     s = s.replace('"', "").replace("“", "").replace("”", "")
 
     s = re.sub(r"\s*-\s*", " – ", s)
-    s = re.sub(r"\bNew\b|\b100% Original\b|\bFree Shipping\b|#[A-Za-z0-9_]+|[\U0001F300-\U0001FAFF]", "", s, flags=re.IGNORECASE)
+    s = re.sub(
+        r"\bNew\b|\b100% Original\b|\bFree Shipping\b|#[A-Za-z0-9_]+|[\U0001F300-\U0001FAFF]",
+        "",
+        s,
+        flags=re.IGNORECASE
+    )
     s = re.sub(r"\s+", " ", s).strip()
+
+    # точно " Ml " / "ML" / "mL" / "ml" -> " ml "
+    s = re.sub(r"\bml\b", "ml", s, flags=re.IGNORECASE)
 
     # маха "0 Ml", "0 ML", "0ml", "0.0 Ml" и подобни
     s = re.sub(r"\b0(?:[.,]0+)?\s*ML\b", "", s, flags=re.IGNORECASE)
@@ -95,12 +106,29 @@ def clean_price(v):
     s = str(v).strip()
     if not s:
         return None
+
     s = s.replace("€", "").replace("$", "").replace("£", "")
-    s = re.sub(r"[^\d,.\-]", "", s).replace(" ", "").replace(",", ".")
+    s = s.replace(" ", "")
+
+    # По-умна логика:
+    # 1,234.56 -> 1234.56
+    # 1.234,56 -> 1234.56
+    # 12,50 -> 12.50
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    else:
+        s = s.replace(",", ".")
+
+    s = re.sub(r"[^\d.\-]", "", s)
+
     try:
         x = float(s)
     except ValueError:
         return None
+
     return round(x + 1e-7, 2)
 
 def fmt_price(val, currency="EUR", primary=False, strike=False):
@@ -131,12 +159,18 @@ def ean13_normalize(s):
         return ""
     return d
 
+# ---------------- Alignment helpers ----------------
+def normalize_align(v, default="left"):
+    v = (v or "").strip().lower()
+    if v in {"left", "center", "right"}:
+        return v
+    return default
+
 # ---------------- HTML builder ----------------
 def build_html(df, plan, currency="EUR"):
     table_style = "max-width:600px;margin:0 auto;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.2;table-layout:auto;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%"
-    th_style = "border:1px solid #e5e7eb;padding:4px 6px;background:#f8fafc;vertical-align:middle;text-align:left;white-space:nowrap"
-    td_text = "border:1px solid #e5e7eb;padding:4px 6px;vertical-align:middle;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
-    td_num = td_text + ";text-align:right;width:1%"
+    th_base = "border:1px solid #e5e7eb;padding:4px 6px;background:#f8fafc;vertical-align:middle;white-space:nowrap"
+    td_base = "border:1px solid #e5e7eb;padding:4px 6px;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
 
     used = [p for p in plan if p["use"]]
 
@@ -173,41 +207,47 @@ def build_html(df, plan, currency="EUR"):
             if not p["use"]:
                 continue
 
-            src, role = p["src"], p["role"]
+            src = p["src"]
+            role = p["role"]
+            align = normalize_align(p.get("align"), default="left")
             val = row[src] if src in df.columns else ""
+
+            td_style = f"{td_base};text-align:{align}"
+            if role in {"Stock", "QTY", "Price", "Promo Price"}:
+                td_style += ";width:1%"
 
             if src in name_srcs:
                 short, full = normalize_name(val, title_every_word=True)
-                cells.append(f'<td style="{td_text};max-width:360px;" title="{full}">{short}</td>')
+                cells.append(f'<td style="{td_style};max-width:360px;" title="{full}">{short}</td>')
                 if short:
                     empty = False
                 continue
 
             if role in {"Stock", "QTY"}:
                 s = re.sub(r"[^\d]", "", str(val))
-                cells.append(f'<td style="{td_num}">{s}</td>' if s else f'<td style="{td_num}"></td>')
+                cells.append(f'<td style="{td_style}">{s}</td>' if s else f'<td style="{td_style}"></td>')
                 if s:
                     empty = False
 
             elif role == "EAN":
                 s = ean13_normalize(val)
-                cells.append(f'<td style="{td_text}">{s}</td>')
+                cells.append(f'<td style="{td_style}">{s}</td>')
                 if s:
                     empty = False
 
             elif role == "Price":
-                cells.append(f'<td style="{td_num}">{price_html}</td>' if price_html else f'<td style="{td_num}"></td>')
+                cells.append(f'<td style="{td_style}">{price_html}</td>' if price_html else f'<td style="{td_style}"></td>')
                 if price_html:
                     empty = False
 
             elif role == "Promo Price":
-                cells.append(f'<td style="{td_num}">{promo_html}</td>' if promo_html else f'<td style="{td_num}"></td>')
+                cells.append(f'<td style="{td_style}">{promo_html}</td>' if promo_html else f'<td style="{td_style}"></td>')
                 if promo_html:
                     empty = False
 
             else:
                 v = str(val).strip()
-                cells.append(f'<td style="{td_text}">{v}</td>' if v else f'<td style="{td_text}"></td>')
+                cells.append(f'<td style="{td_style}">{v}</td>' if v else f'<td style="{td_style}"></td>')
                 if v:
                     empty = False
 
@@ -216,10 +256,14 @@ def build_html(df, plan, currency="EUR"):
 
         rows.append("<tr>" + "".join(cells) + "</tr>")
 
-    def th_align(role):
-        return th_style if role not in {"Stock", "QTY", "Price", "Promo Price"} else th_style.replace("text-align:left", "text-align:right")
+    thead = ""
+    for p in plan:
+        if not p["use"]:
+            continue
+        th_align = normalize_align(p.get("align"), default="left")
+        th_style = f"{th_base};text-align:{th_align}"
+        thead += f'<th style="{th_style}">{p["header"]}</th>'
 
-    thead = "".join([f'<th style="{th_align(p["role"])}">{p["header"]}</th>' for p in plan if p["use"]])
     tbody = "".join(rows)
     html = f'<table role="presentation" style="{table_style}"><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>'
     return re.sub(r">\s+<", "><", html)
@@ -234,9 +278,9 @@ def wrap(content_html: str) -> str:
 :root{--bg:#f5f6f8;--panel:#fff;--muted:#6b7280;--text:#0f172a;--border:#e5e7eb;--pink:#ec4899;--pink-hover:#f472b6;--pink-soft:#fde7f3}
 *{box-sizing:border-box} body{font-family:Inter,Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text);margin:0}
 .header{position:sticky;top:0;background:#ffffffcc;backdrop-filter:blur(8px);border-bottom:1px solid var(--border);z-index:10}
-.header .wrap{max-width:1100px;margin:0 auto;padding:14px 20px;display:flex;gap:12px;align-items:center}
+.header .wrap{max-width:1200px;margin:0 auto;padding:14px 20px;display:flex;gap:12px;align-items:center}
 .brand{font-weight:700;letter-spacing:.2px}.pill{background:var(--pink-soft);color:#be185d;padding:4px 10px;border-radius:999px;font-size:12px}
-.container{max-width:1100px;margin:24px auto;padding:0 20px}
+.container{max-width:1200px;margin:24px auto;padding:0 20px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:0 6px 18px rgba(0,0,0,.05)}
 h2{margin:18px 0 10px 0;font-size:22px} label{font-weight:600}
 input[type=text],input[type=file],select{width:100%;padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:10px;color:#0f172a}
@@ -245,9 +289,12 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--pink);box-sh
 .btn:hover{background:var(--pink-hover)} .btn.secondary{background:#e5e7eb;color:#111827}
 .small{font-size:12px;color:var(--muted)} .badge{display:inline-block;background:#fff;border:1px solid var(--border);color:#111827;padding:4px 10px;border-radius:999px;font-size:12px;margin:3px 4px}
 .cols{width:100%;border-radius:10px;overflow:hidden;border:1px solid var(--border)} .cols th{background:#f8fafc}
-th,td{border:1px solid var(--border);padding:8px 10px} .role{width:180px} .use{text-align:center;width:90px}
+th,td{border:1px solid var(--border);padding:8px 10px}
+.role{width:170px}
+.aligncol{width:140px}
+.use{text-align:center;width:90px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.preview{border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:520px;background:#fff}
+.preview{border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:520px;background:#fff;padding:12px}
 </style></head><body>
 <div class="header"><div class="wrap"><div class="brand">Excel → HTML Table</div><span class="pill">Grey ✕ Pink</span></div></div>
 <div class="container">{CONTENT}</div></body></html>
@@ -302,6 +349,7 @@ T_PLAN = wrap("""
           <th>Оригинално име</th>
           <th>Име в крайния файл</th>
           <th class="role">Роля</th>
+          <th class="aligncol">Подравняване</th>
           <th class="use">Ползвай</th>
         </tr>
       </thead>
@@ -317,6 +365,14 @@ T_PLAN = wrap("""
               {% for r in roles %}
                 <option value="{{ r }}" {% if det==r %}selected{% endif %}>{{ r }}</option>
               {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select name="align_{{ loop.index0 }}" class="aligncol">
+              {% set al = auto_aligns.get(h.lower(), 'left') %}
+              <option value="left" {% if al=='left' %}selected{% endif %}>Left</option>
+              <option value="center" {% if al=='center' %}selected{% endif %}>Center</option>
+              <option value="right" {% if al=='right' %}selected{% endif %}>Right</option>
             </select>
           </td>
           <td class="use"><input type="checkbox" name="use_{{ loop.index0 }}" value="1" checked></td>
@@ -373,6 +429,13 @@ def detect_role(h):
     if hl in {"promo", "promo price", "sale price", "discount price"}:
         return "Promo Price"
     return "Text"
+
+def default_align_for_role(role):
+    if role in {"Stock", "QTY", "Price", "Promo Price"}:
+        return "right"
+    if role == "EAN":
+        return "center"
+    return "left"
 
 # ---------------- Routes ----------------
 @app.route("/")
@@ -440,12 +503,14 @@ def select_sheet():
     STORAGE[sid]["headers"] = list(df.columns)
 
     auto_roles = {h.lower(): detect_role(h) for h in STORAGE[sid]["headers"]}
+    auto_aligns = {h.lower(): default_align_for_role(auto_roles[h.lower()]) for h in STORAGE[sid]["headers"]}
     roles = ["Text", "EAN", "Name", "Stock", "QTY", "Price", "Promo Price"]
 
     return render_template_string(
         T_PLAN,
         headers=STORAGE[sid]["headers"],
         auto_roles=auto_roles,
+        auto_aligns=auto_aligns,
         roles=roles
     )
 
@@ -463,6 +528,7 @@ def generate():
         src = request.form.get(f"src_{i}")
         hdr = (request.form.get(f"hdr_{i}") or "").strip()
         role = request.form.get(f"role_{i}") or "Text"
+        align = normalize_align(request.form.get(f"align_{i}"), default=default_align_for_role(role))
         use = (request.form.get(f"use_{i}") == "1")
 
         if not src:
@@ -474,6 +540,7 @@ def generate():
             "src": src,
             "header": hdr,
             "role": role,
+            "align": align,
             "use": use
         })
 
