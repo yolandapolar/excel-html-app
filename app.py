@@ -9,40 +9,53 @@ STORAGE = {}
 
 # ---------------- Name helpers ----------------
 ACRONYM_CANON = {
-    "edp":"EDP","edt":"EDT","edc":"EDC","ysl":"YSL","ck":"CK","dkny":"DKNY",
-    "spf":"SPF","uv":"UV","uva":"UVA","uvb":"UVB","egf":"EGF","sd":"SD",
-    "hdmi":"HDMI","usb":"USB","ph":"pH"
+    "edp": "EDP", "edt": "EDT", "edc": "EDC", "ysl": "YSL", "ck": "CK", "dkny": "DKNY",
+    "spf": "SPF", "uv": "UV", "uva": "UVA", "uvb": "UVB", "egf": "EGF", "sd": "SD",
+    "hdmi": "HDMI", "usb": "USB", "ph": "pH"
 }
-SMALL_WORDS = {"de","des","du","le","la","les","pour","aux","and","of","the","for","with","von","di","da","del","in","on","at","by","to"}
+SMALL_WORDS = {"de", "des", "du", "le", "la", "les", "pour", "aux", "and", "of", "the", "for", "with", "von", "di", "da", "del", "in", "on", "at", "by", "to"}
 
-def _title_token(tok:str, first_in_seg:bool)->str:
-    if not tok: return tok
+def _title_token(tok: str, first_in_seg: bool) -> str:
+    if not tok:
+        return tok
     low = tok.lower()
     if low in ACRONYM_CANON:
         return ACRONYM_CANON[low]
-    # не пазим произволни ALL-CAPS думи → Title Case
     if not first_in_seg and low in SMALL_WORDS:
         return low
     return tok[0].upper() + tok[1:].lower()
 
-def _every_word_cap(tok:str)->str:
-    if not tok: return tok
+def _every_word_cap(tok: str) -> str:
+    if not tok:
+        return tok
     low = tok.lower()
     if low in ACRONYM_CANON:
         return ACRONYM_CANON[low]
     return tok[0].upper() + tok[1:].lower()
 
 def normalize_name(text, title_every_word=True):
-    if text is None: return "", ""
+    if text is None:
+        return "", ""
+
     s = str(text).strip()
-    if not s: return "", ""
-    s = re.sub(r"\s+"," ", s)
-    s = s.replace("’","'").replace("`","'")
-    s = s.replace("—","-").replace("–","-").replace("•","-").replace("|","-").replace("/","-")
-    s = s.replace('"',"").replace("“","").replace("”","")
+    if not s:
+        return "", ""
+
+    s = re.sub(r"\s+", " ", s)
+    s = s.replace("’", "'").replace("`", "'")
+    s = s.replace("—", "-").replace("–", "-").replace("•", "-").replace("|", "-").replace("/", "-")
+    s = s.replace('"', "").replace("“", "").replace("”", "")
+
     s = re.sub(r"\s*-\s*", " – ", s)
-    s = re.sub(r"\bNew\b|\b100% Original\b|\bFree Shipping\b|#[A-Za-z0-9_]+|[\U0001F300-\U0001FAFF]","",s,flags=re.IGNORECASE)
-    s = re.sub(r"\s+"," ", s).strip()
+    s = re.sub(r"\bNew\b|\b100% Original\b|\bFree Shipping\b|#[A-Za-z0-9_]+|[\U0001F300-\U0001FAFF]", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # маха "0 Ml", "0 ML", "0ml", "0.0 Ml" и подобни
+    s = re.sub(r"\b0(?:[.,]0+)?\s*ML\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b0(?:[.,]0+)?\s*OZ\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # нормализира количества
     s = re.sub(r"\b([0-9]+)\s*ML\b", r"\1 ml", s, flags=re.IGNORECASE)
     s = re.sub(r"\b([0-9.]+)\s*OZ\b", r"\1 oz", s, flags=re.IGNORECASE)
 
@@ -53,118 +66,166 @@ def normalize_name(text, title_every_word=True):
         for w in seg.split(" "):
             if "-" in w:
                 parts = w.split("-")
-                parts = [_every_word_cap(p) if title_every_word else
-                         _title_token(p, first_in_seg=(len(words)==0 and i==0))
-                         for i,p in enumerate(parts)]
+                parts = [
+                    _every_word_cap(p) if title_every_word else _title_token(p, first_in_seg=(len(words) == 0 and i == 0))
+                    for i, p in enumerate(parts)
+                ]
                 words.append("-".join(parts))
             else:
-                words.append(_every_word_cap(w) if title_every_word
-                             else _title_token(w, first_in_seg=(len(words)==0)))
+                words.append(_every_word_cap(w) if title_every_word else _title_token(w, first_in_seg=(len(words) == 0)))
         out.append(" ".join(words))
+
     s = " – ".join(out)
-    s = s.replace("Eau De Parfum","Eau de Parfum").replace("Eau De Toilette","Eau de Toilette").replace("Eau De Cologne","Eau de Cologne")
+    s = s.replace("Eau De Parfum", "Eau de Parfum").replace("Eau De Toilette", "Eau de Toilette").replace("Eau De Cologne", "Eau de Cologne")
+    s = re.sub(r"\(\s*\)", "", s)
+    s = re.sub(r"\[\s*\]", "", s)
+    s = re.sub(r"\s+[-–]\s*$", "", s)
+    s = re.sub(r"^\s+[-–]\s+", "", s)
+    s = re.sub(r"\s+", " ", s).strip()
+
     full = s
-    if len(s)>60: s = s[:60]+"…"
+    if len(s) > 60:
+        s = s[:60] + "…"
     return s, full
 
 # ---------------- Numbers / Price / EAN ----------------
 def clean_price(v):
-    if v is None: return None
+    if v is None:
+        return None
     s = str(v).strip()
-    if not s: return None
-    s = s.replace("€","").replace("$","").replace("£","")
-    s = re.sub(r"[^\d,.\-]","",s).replace(" ","").replace(",",".")
-    try: x = float(s)
-    except ValueError: return None
-    return round(x+1e-7,2)
+    if not s:
+        return None
+    s = s.replace("€", "").replace("$", "").replace("£", "")
+    s = re.sub(r"[^\d,.\-]", "", s).replace(" ", "").replace(",", ".")
+    try:
+        x = float(s)
+    except ValueError:
+        return None
+    return round(x + 1e-7, 2)
 
-def fmt_price(val, show_currency=True, primary=False, strike=False):
-    if val is None: return ""
-    num = f"{val:.2f}" + ("€" if show_currency else "")
-    if primary: return f'<span style="color:#dc2626;font-size:13px;font-weight:700">{num}</span>'
-    if strike:  return f'<span style="text-decoration:line-through;color:#6b7280">{num}</span>'
+def fmt_price(val, currency="EUR", primary=False, strike=False):
+    if val is None:
+        return ""
+    symbol_map = {
+        "NONE": "",
+        "EUR": "€",
+        "USD": "$",
+    }
+    symbol = symbol_map.get(currency, "€")
+    num = f"{val:.2f}{symbol}"
+    if primary:
+        return f'<span style="color:#dc2626;font-size:13px;font-weight:700">{num}</span>'
+    if strike:
+        return f'<span style="text-decoration:line-through;color:#6b7280">{num}</span>'
     return num
 
 def ean13_normalize(s):
-    if s is None: return ""
-    d = re.sub(r"\D","", str(s))
-    if not d: return ""
-    if len(d)<13: d = d.zfill(13)
-    elif len(d)>13: return ""
+    if s is None:
+        return ""
+    d = re.sub(r"\D", "", str(s))
+    if not d:
+        return ""
+    if len(d) < 13:
+        d = d.zfill(13)
+    elif len(d) > 13:
+        return ""
     return d
 
 # ---------------- HTML builder ----------------
-def build_html(df, plan, currency_none=False):
+def build_html(df, plan, currency="EUR"):
     table_style = "max-width:600px;margin:0 auto;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.2;table-layout:auto;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%"
     th_style = "border:1px solid #e5e7eb;padding:4px 6px;background:#f8fafc;vertical-align:middle;text-align:left;white-space:nowrap"
     td_text = "border:1px solid #e5e7eb;padding:4px 6px;vertical-align:middle;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
-    td_num  = td_text + ";text-align:right;width:1%"
-
-    show_currency = not currency_none
+    td_num = td_text + ";text-align:right;width:1%"
 
     used = [p for p in plan if p["use"]]
-    # Кой да се капитализира:
-    name_srcs = {p["src"] for p in used if p["role"] == "Name"}
-    if not name_srcs and len(used) >= 2:
-        name_srcs = {used[1]["src"]}  # втората използвана колона по подразбиране
 
-    role_src = {p["role"]: p["src"] for p in used if p["role"] in {"Price","Promo Price"}}
+    # Коя колона да се нормализира като име:
+    # 1) ако има роля Name -> тя
+    # 2) ако няма, а има EAN -> следващата използвана след EAN
+    # 3) иначе втората използвана
+    name_srcs = {p["src"] for p in used if p["role"] == "Name"}
+    if not name_srcs:
+        ean_index = next((i for i, p in enumerate(used) if p["role"] == "EAN"), None)
+        if ean_index is not None and ean_index + 1 < len(used):
+            name_srcs = {used[ean_index + 1]["src"]}
+        elif len(used) >= 2:
+            name_srcs = {used[1]["src"]}
+
+    role_src = {p["role"]: p["src"] for p in used if p["role"] in {"Price", "Promo Price"}}
 
     rows = []
     for _, row in df.iterrows():
         price_val = clean_price(row[role_src["Price"]]) if "Price" in role_src else None
         promo_val = clean_price(row[role_src["Promo Price"]]) if "Promo Price" in role_src else None
+
         if promo_val is not None and promo_val > 0:
-            promo_html = fmt_price(promo_val, show_currency, primary=True)
-            price_html = fmt_price(price_val, show_currency, strike=True) if price_val is not None else ""
+            promo_html = fmt_price(promo_val, currency=currency, primary=True)
+            price_html = fmt_price(price_val, currency=currency, strike=True) if price_val is not None else ""
         else:
             promo_html = ""
-            price_html = fmt_price(price_val, show_currency)
+            price_html = fmt_price(price_val, currency=currency)
 
         cells = []
         empty = True
+
         for p in plan:
-            if not p["use"]: continue
+            if not p["use"]:
+                continue
+
             src, role = p["src"], p["role"]
             val = row[src] if src in df.columns else ""
 
             if src in name_srcs:
                 short, full = normalize_name(val, title_every_word=True)
                 cells.append(f'<td style="{td_text};max-width:360px;" title="{full}">{short}</td>')
-                if short: empty = False
+                if short:
+                    empty = False
                 continue
 
-            if role in {"Stock","QTY"}:
-                s = re.sub(r"[^\d]","", str(val))
+            if role in {"Stock", "QTY"}:
+                s = re.sub(r"[^\d]", "", str(val))
                 cells.append(f'<td style="{td_num}">{s}</td>' if s else f'<td style="{td_num}"></td>')
-                if s: empty = False
+                if s:
+                    empty = False
+
             elif role == "EAN":
                 s = ean13_normalize(val)
                 cells.append(f'<td style="{td_text}">{s}</td>')
-                if s: empty = False
+                if s:
+                    empty = False
+
             elif role == "Price":
                 cells.append(f'<td style="{td_num}">{price_html}</td>' if price_html else f'<td style="{td_num}"></td>')
-                if price_html: empty = False
+                if price_html:
+                    empty = False
+
             elif role == "Promo Price":
                 cells.append(f'<td style="{td_num}">{promo_html}</td>' if promo_html else f'<td style="{td_num}"></td>')
-                if promo_html: empty = False
+                if promo_html:
+                    empty = False
+
             else:
                 v = str(val).strip()
                 cells.append(f'<td style="{td_text}">{v}</td>' if v else f'<td style="{td_text}"></td>')
-                if v: empty = False
+                if v:
+                    empty = False
 
-        if empty: continue
-        rows.append("<tr>"+"".join(cells)+"</tr>")
+        if empty:
+            continue
+
+        rows.append("<tr>" + "".join(cells) + "</tr>")
 
     def th_align(role):
-        return th_style if role not in {"Stock","QTY","Price","Promo Price"} else th_style.replace("text-align:left","text-align:right")
+        return th_style if role not in {"Stock", "QTY", "Price", "Promo Price"} else th_style.replace("text-align:left", "text-align:right")
+
     thead = "".join([f'<th style="{th_align(p["role"])}">{p["header"]}</th>' for p in plan if p["use"]])
     tbody = "".join(rows)
     html = f'<table role="presentation" style="{table_style}"><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>'
-    return re.sub(r">\s+<","><",html)
+    return re.sub(r">\s+<", "><", html)
 
 # ---------------- UI (grey + pink) ----------------
-def wrap(content_html:str)->str:
+def wrap(content_html: str) -> str:
     T_BASE = """
 <!doctype html><html><head><meta charset="utf-8"><title>Excel → HTML Table</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -197,7 +258,12 @@ T_UPLOAD = wrap("""
 <div class="card">
   <h2>1) Качи Excel (.xlsx)</h2>
   <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
-    <div class="row"><div><label>Файл</label><br><input type="file" name="file" accept=".xlsx" required></div></div>
+    <div class="row">
+      <div>
+        <label>Файл</label><br>
+        <input type="file" name="file" accept=".xlsx" required>
+      </div>
+    </div>
     <p class="small">Файлът се обработва локално.</p>
     <button class="btn">Качи</button>
   </form>
@@ -206,9 +272,19 @@ T_UPLOAD = wrap("""
 
 T_FOUND = wrap("""
 <div class="card">
-  <h2>2) Намерени колони (както са в XLSX)</h2>
-  <p>{% for h in headers %}<span class="badge">{{ h }}</span>{% endfor %}</p>
-  <form action="{{ url_for('plan') }}" method="post">
+  <h2>2) Намерени листове в Excel файла</h2>
+  <p class="small">Файлът съдържа <b>{{ sheet_count }}</b> лист(а). Избери кой лист искаш да обработиш:</p>
+
+  <form action="{{ url_for('select_sheet') }}" method="post">
+    <div style="max-width:420px;margin:12px 0">
+      <label>Лист</label>
+      <select name="sheet_name" required>
+        {% for s in sheet_names %}
+          <option value="{{ s }}">{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
     <button class="btn">Продължи</button>
     <a href="{{ url_for('index') }}" class="btn secondary">Назад</a>
   </form>
@@ -220,7 +296,15 @@ T_PLAN = wrap("""
   <h2>3) Настрой за всяка колона</h2>
   <form action="{{ url_for('generate') }}" method="post">
     <table class="cols">
-      <thead><tr><th>#</th><th>Оригинално име</th><th>Име в крайния файл</th><th class="role">Роля</th><th class="use">Ползвай</th></tr></thead>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Оригинално име</th>
+          <th>Име в крайния файл</th>
+          <th class="role">Роля</th>
+          <th class="use">Ползвай</th>
+        </tr>
+      </thead>
       <tbody>
       {% for h in headers %}
         <tr>
@@ -230,7 +314,9 @@ T_PLAN = wrap("""
           <td>
             <select name="role_{{ loop.index0 }}" class="role">
               {% set det = auto_roles.get(h.lower(), 'Text') %}
-              {% for r in roles %}<option value="{{ r }}" {% if det==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+              {% for r in roles %}
+                <option value="{{ r }}" {% if det==r %}selected{% endif %}>{{ r }}</option>
+              {% endfor %}
             </select>
           </td>
           <td class="use"><input type="checkbox" name="use_{{ loop.index0 }}" value="1" checked></td>
@@ -238,9 +324,22 @@ T_PLAN = wrap("""
       {% endfor %}
       </tbody>
     </table>
+
     <hr>
-    <label><input type="checkbox" name="currency_none" value="1"> Options: Currency=None (без „€“)</label>
-    <div style="margin-top:14px"><button class="btn">Генерирай HTML</button> <a href="{{ url_for('index') }}" class="btn secondary">Начало</a></div>
+
+    <div style="max-width:320px">
+      <label>Валута</label>
+      <select name="currency">
+        <option value="EUR" selected>EUR (€)</option>
+        <option value="USD">USD ($)</option>
+        <option value="NONE">Без валута</option>
+      </select>
+    </div>
+
+    <div style="margin-top:14px">
+      <button class="btn">Генерирай HTML</button>
+      <a href="{{ url_for('index') }}" class="btn secondary">Начало</a>
+    </div>
   </form>
 </div>
 """)
@@ -248,12 +347,32 @@ T_PLAN = wrap("""
 T_RESULT = wrap("""
 <div class="card">
   <h2>4) Резултат</h2>
-  <p><a class="btn" href="{{ url_for('download_html', sid=sid) }}">Свали products_table_{{ today }}.html</a>
-     <a href="{{ url_for('index') }}" class="btn secondary">Ново качване</a></p>
+  <p class="small">Обработен лист: <b>{{ sheet_name }}</b></p>
+  <p>
+    <a class="btn" href="{{ url_for('download_html', sid=sid) }}">Свали products_table_{{ today }}.html</a>
+    <a href="{{ url_for('index') }}" class="btn secondary">Ново качване</a>
+  </p>
   <p class="small">Преглед:</p>
   <div class="preview">{{ preview|safe }}</div>
 </div>
 """)
+
+# ---------------- Helpers ----------------
+def detect_role(h):
+    hl = h.lower().strip()
+    if hl in {"ean", "barcode", "ean13"}:
+        return "EAN"
+    if hl in {"name", "product", "title"}:
+        return "Name"
+    if hl in {"qty", "quantity"}:
+        return "QTY"
+    if hl in {"stock", "available", "onhand"}:
+        return "Stock"
+    if hl in {"price", "regular price", "list price"}:
+        return "Price"
+    if hl in {"promo", "promo price", "sale price", "discount price"}:
+        return "Promo Price"
+    return "Text"
 
 # ---------------- Routes ----------------
 @app.route("/")
@@ -281,69 +400,104 @@ def upload():
 
         STORAGE[sid] = {"xlsx": data}
 
-        df = pd.read_excel(io.BytesIO(data), sheet_name=0, dtype=str, engine="openpyxl").fillna("")
-        print("DEBUG df shape:", df.shape)
+        excel_file = pd.ExcelFile(io.BytesIO(data), engine="openpyxl")
+        sheet_names = excel_file.sheet_names
+        print("DEBUG sheets:", sheet_names)
 
-        STORAGE[sid]["df"] = df
-        STORAGE[sid]["headers"] = list(df.columns)
+        STORAGE[sid]["sheet_names"] = sheet_names
 
-        return render_template_string(T_FOUND, headers=STORAGE[sid]["headers"])
+        return render_template_string(
+            T_FOUND,
+            sheet_names=sheet_names,
+            sheet_count=len(sheet_names)
+        )
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return f"<h1>UPLOAD ERROR</h1><pre>{str(e)}</pre>", 500
 
-@app.route("/plan", methods=["POST"])
-def plan():
+@app.route("/select_sheet", methods=["POST"])
+def select_sheet():
     sid = session.get("sid")
     if not sid or sid not in STORAGE:
         return redirect(url_for("index"))
-    headers = STORAGE[sid]["headers"]
-    def detect(h):
-        hl = h.lower().strip()
-        if hl in {"ean","barcode","ean13"}: return "EAN"
-        if hl in {"name","product","title"}: return "Name"
-        if hl in {"qty","quantity"}: return "QTY"
-        if hl in {"stock","available","onhand"}: return "Stock"
-        if hl in {"price","regular price","list price"}: return "Price"
-        if hl in {"promo","promo price","sale price","discount price"}: return "Promo Price"
-        return "Text"
-    auto_roles = {h.lower(): detect(h) for h in headers}
-    roles = ["Text","EAN","Name","Stock","QTY","Price","Promo Price"]
-    return render_template_string(T_PLAN, headers=headers, auto_roles=auto_roles, roles=roles)
+
+    sheet_name = request.form.get("sheet_name")
+    if not sheet_name:
+        return "Не е избран лист.", 400
+
+    data = STORAGE[sid]["xlsx"]
+    df = pd.read_excel(
+        io.BytesIO(data),
+        sheet_name=sheet_name,
+        dtype=str,
+        engine="openpyxl"
+    ).fillna("")
+
+    STORAGE[sid]["selected_sheet"] = sheet_name
+    STORAGE[sid]["df"] = df
+    STORAGE[sid]["headers"] = list(df.columns)
+
+    auto_roles = {h.lower(): detect_role(h) for h in STORAGE[sid]["headers"]}
+    roles = ["Text", "EAN", "Name", "Stock", "QTY", "Price", "Promo Price"]
+
+    return render_template_string(
+        T_PLAN,
+        headers=STORAGE[sid]["headers"],
+        auto_roles=auto_roles,
+        roles=roles
+    )
 
 @app.route("/generate", methods=["POST"])
 def generate():
     sid = session.get("sid")
     if not sid or sid not in STORAGE:
         return redirect(url_for("index"))
+
     df = STORAGE[sid]["df"].copy()
     headers = STORAGE[sid]["headers"]
 
     plan = []
-    for i,_ in enumerate(headers):
+    for i, _ in enumerate(headers):
         src = request.form.get(f"src_{i}")
         hdr = (request.form.get(f"hdr_{i}") or "").strip()
         role = request.form.get(f"role_{i}") or "Text"
-        use  = (request.form.get(f"use_{i}") == "1")
-        if not src: continue
-        if not hdr: hdr = src
-        plan.append({"src":src, "header":hdr, "role":role, "use":use})
+        use = (request.form.get(f"use_{i}") == "1")
+
+        if not src:
+            continue
+        if not hdr:
+            hdr = src
+
+        plan.append({
+            "src": src,
+            "header": hdr,
+            "role": role,
+            "use": use
+        })
 
     if not any(p["use"] for p in plan):
         return "Не е избрана нито една колона за крайния файл.", 400
 
-    currency_none = (request.form.get("currency_none") == "1")
-    html = build_html(df, plan, currency_none=currency_none)
+    currency = request.form.get("currency", "EUR")
+    html = build_html(df, plan, currency=currency)
 
     STORAGE[sid]["html"] = html
     STORAGE[sid]["filename"] = f"products_table_{date.today().isoformat()}.html"
-    return render_template_string(T_RESULT, sid=sid, today=date.today().isoformat(), preview=html)
+
+    return render_template_string(
+        T_RESULT,
+        sid=sid,
+        today=date.today().isoformat(),
+        preview=html,
+        sheet_name=STORAGE[sid].get("selected_sheet", "")
+    )
 
 @app.route("/download/<sid>")
 def download_html(sid):
-    if sid not in STORAGE or "html" not in STORAGE[sid]: abort(404)
+    if sid not in STORAGE or "html" not in STORAGE[sid]:
+        abort(404)
     html = STORAGE[sid]["html"].encode("utf-8")
     fn = STORAGE[sid].get("filename", f"products_table_{date.today().isoformat()}.html")
     return send_file(io.BytesIO(html), mimetype="text/html", as_attachment=True, download_name=fn)
